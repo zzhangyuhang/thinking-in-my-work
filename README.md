@@ -346,6 +346,4 @@
 
 ![整体架构](https://github.com/zzhangyuhang/thinking-in-my-work/blob/master/整体架构.png)
 
-![分层概念](https://github.com/zzhangyuhang/thinking-in-my-work/blob/master/分层概念.png)
-
 ![数据仓库架构](https://github.com/zzhangyuhang/thinking-in-my-work/blob/master/数据仓库架构的理解.jpg)
