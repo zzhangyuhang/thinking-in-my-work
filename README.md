@@ -253,6 +253,57 @@
 * 现在有打点数据,每条都有from信息,直接统计总的,并不用考虑关联节省了很多事情.以及减少了多个误差.
 
 
+## <font color="Coral">3.22,关于hive传参问题</font>
+### 传参的几种方式
+1. python脚本 
+
+```sql
+	hql = """
+		select...where col = %d 
+	""" % (parameter)
+```
+
+2. hiveconf
+	* 在hql脚本开头设置参数 ``` set parameter='val1' ```
+	* 在执行脚本时设置参数 ``` hive -hiveconf parameter='val1' -f test.hql ```
+	* 在脚本中使用参数 ``` ${hiveconf:parameter} ```
+	* 示例
+
+```sql
+
+-- 查询标签名
+set tag_name='#YEEZY冲不冲#';
+-- 开始日期
+set start_date='20190329';
+-- 结束日期
+set end_date='20190330';
+
+select t.partition_date,
+       sum(detail_pv),
+       round(sum(like_pv)/sum(detail_pv), 2),
+       round(sum(comment_pv)/sum(like_pv), 2)
+from(
+    select partition_date,
+           request_body_params['sid'] sid, 
+           sum(if(request_path = '/show/getdetail', 1, 0)) as detail_pv,
+           sum(if(request_path = '/show/like', 1, 0)) as like_pv,
+           sum(if(request_path = '/show/comment', 1, 0)) as comment_pv
+    from dw.dw_ml_access
+    where partition_date between ${hiveconf:start_date} and ${hiveconf:end_date}
+      and request_path in('/show/getdetail', '/show/like', '/show/comment')
+    group by 1,2
+) t
+join(
+    select distinct id as sid
+    from kkgoo.user_show_sid
+    where from_unixtime(add_time,'yyyyMMdd') between ${hiveconf:start_date} and ${hiveconf:end_date}
+    and content rlike ${hiveconf:tag_name}
+) s on t.sid = s.sid
+group by 1
+
+```
+
+
 ## <font color="Coral">3.23,关于UGC的思考</font>
 ### 工作内容
 * 最近一直在出UGC相关的数据报表,数据主要是UGC的ctr.
@@ -347,3 +398,30 @@
 ![整体架构](https://github.com/zzhangyuhang/thinking-in-my-work/blob/master/整体架构.png)
 
 ![数据仓库架构](https://github.com/zzhangyuhang/thinking-in-my-work/blob/master/数据仓库架构的理解.jpg)
+
+## <font color="Coral">4.1,如何做好数据仓库</font>
+### 思考源头
+* 如何做好数据仓库?这是一个比较空泛的问题?怎么是好?
+* 其实可以理解为如何更好的支持业务.从开始实习到现在,每天都在处理需求.天天做需求,有的时候真的挺烦的.为什么需求一直做不完呢?最近总有这种困扰.
+
+### 自我理解
+* 数据仓库怎么才叫好呢?
+	* 数据仓库需要能够支持各种各样的数据需求.
+	* 数据仓库数据分类要明确.
+	* 数据仓库能快速支持数据需求.
+* 首先数能够支持各种数据需求,我们现在的数据仓库并不能很好的做好这一点.主要原因是自我定位的问题.我刚来的时候是我总以自己是实习生的身份来做任何事情,以为分配我的工作就是辅助全职来处理平时的数据需求工作.其实不然,我的工作应该是从处理需求过程中来推动数据仓库建设的.其实在每天的渊源不断的数据需求中,大部分的需求都是相同的.我们需要把重复的/每天都要看的,做成报表或者以数据可视化的形式展现出去,而不是等着业务方来索要数据.做数据需要从被动转化为主动.从平时需求来抽象成日常数据完成角色转换.以及转变思想到他们想要什么?有的运营人员并不是很专业,他们想要查看的数据也可能表达不清楚.在做数据需求前需要明白他究竟想要看什么?而不是完全照做.
+* 数据仓库分类和快速支持数据需求是分不开的.分类明确完好就能快速支持数据需求.仓库分层明确很重要,我们目前的分层策略还可以,但是有待完善.有待完善的是需要按照主题来分配需求的去向.我们现在的数据只是分层了并没有特别明确的面向主题.相关的维度模型还没有构建好.这块确实是一个需要后续完善的地方.
+
+### 认识
+* 数据仓库是为了支持决策制定的.
+	* 不是面向财务,允许有误差,要能解释清楚.
+	* 输出口径要严格一致.
+* 数据仓库管理者的责任
+	* 理解业务用户的责任/目标/目的/任务
+	* 业务的高质量的理解/分析
+		* 一般理解/分析业务要从流程入手,从不同流程/不同角度来理解/分析业务
+		* 例如购买流程:用户访问首页 -> 用户搜索 -> 用户到list页面 -> 用户到detail页面 -> 下单 -> 成单 -> 利润.
+			* 管理层看用户行为数据，那么一定是看关键路径的指标，一般不会看每个路径的转化，因为他的kpi是提升整体的收入或者整体的新用户数
+			* 负责用户行为的产品看数据，那么一定是看每个路径的转化指标，因为他的kpi就是提升整体的转化，细化之后就是每个关键节点的转化率
+	* 完善数据仓库的功能,更好解决数据需求
+* 在做数据仓库一定要从业务流程出发/面向不同的主题/面向不同决策人员来理解/分析数据,建立数据仓库的dw/dm层.无需按照所有维度来给出数据(随便一个数据需求就能碰撞出n多维度),这样费力还不能满足别人需求(决策人员也就想看其中一个维度数据).
