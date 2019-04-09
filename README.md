@@ -464,10 +464,15 @@ group by 1
 * transform语法,hql部分
 
 ```sql
-	add file transform.py;
-	
+	add file transform1.py;
+	add file transform2.py;
+	-- 插入新表
+	from(
+	 	select ... from table where ...
+	) tmp
+	insert overwrite table1 partition(dt = '')
 	select transform(tmp.*) -- 使用transform,tmp.*是传入的数据
-	using 'python transform.py' -- 执行transform的文件
+	using 'python transform1.py' -- 执行transform的文件
 	as( -- transform输出结果
 		col1 int,
 		col2 string,
@@ -477,7 +482,25 @@ group by 1
 	delimited fields terminated by '\001'
 	collection items terminated by '\002'
 	map keys terminated by '\003'
+	
+	insert overwrite table1 partition(dt = '')
+	select transform(tmp.*) -- 使用transform,tmp.*是传入的数据
+	using 'python transform2.py' -- 执行transform的文件
+	...
 
+
+	-- 数据转换	
+	select transform(t.*) -- 使用transform,tmp.*是传入的数据
+	using 'python transform.py' -- 执行transform的文件
+	as( -- transform输出结果
+		col1 int,
+		col2 string,
+		...
+	)
+	from(
+		select ... from table where ...
+	) t
+		
 ```
 
 * user_time.hql
@@ -530,7 +553,7 @@ import sys
 	... # 处理过程
 	
 	# transform输出  必须要用print输出
-	print '\t'.join([col1, col2, col3])
+	print '\t'.join(map(str,[col1, col2, col3]))
 
 
 ```
@@ -606,3 +629,43 @@ if __name__ == "__main__":
 
 ```
 
+## <font color="Coral">4.9,ODS和数据仓库</font>
+### 问题
+* 今天在浏览一个数据仓库大佬的博客的时候他阐述他们公司现在存在一个问题是关于订单的历史数据的问题.他们采用的是直接导订单表的方式到数据仓库中,中途没有做任何处理.这样导致产出报表的时候以及临时需求的时候不能满足对历史状态变更的需求.
+* 上面我有提到数据仓库的四个特性
+	1. 面向主题
+	2. 集成
+	3. 反应历史变化
+	4. 相对稳定
+* 我们可以看到大佬公司目前的数据仓库的状态并不满足第三点:反应历史变化.
+
+### 解决
+* 这里需要引入ODS.ODS是操作型的数据集合,数据粒度很细,可以理解为原始数据集.
+* ODS数据的特点
+	1. 即时性
+	2. 操作型
+	3. 集成了全体信息(该次操作的所有信息)
+* ODS中的数据是操作一条,产生一条数据,保存一条数据.ODS中保存了所有的历史数据.
+* 引入ODS后,就可以用ODS来满足历史性数据需求.
+* 通过ODS来完成对历史操作的记录,产出对历史数据的数据需求.
+* 注意:一般不采用接口性/点击性数据来完成对订单历史数据的需求,因为这两种即时性数据产生的误差相对较大.对于订单这种状态流转最好在后台中记录一下.然后导入数据仓库中.
+
+### 架构
+
+* 并行架构
+
+![并行架构](https://github.com/zzhangyuhang/thinking-in-my-work/blob/master/ODS和DW并行.jpg)
+
+* 这个架构可以理解为点击日志一些操作型数据导入ODS,从后端关系型数据库产生的数据直接导入DW.真的很垃圾.对于并行架构来说就舍弃了分层的概念.数据从数据源头直接进入ODS/DW.历史数据需求采用ODS的数据来完成,最终累计型数据需求采用DW的数据来完成.虽然可以完成任何数据需求,但是这样就面临了一种新的问题就是数据源不一样产生的数据结果不同的问题.例如,订单相关的问题.如果采用ODS来统计历史时刻的GMV和DW来统计历史时刻的GMV肯定是不一样的.这个问题可以统一数据源来完成.如果需要用历史数据和累计数据进行对接呢?能对上吗?数据仓库数据口径不统一,可信度差,这个问题相对于无法做历史数据需求这个问题可严重的多.而且放弃了分层概念导致数据之间的耦合度很高.我觉得这个架构真的不好.
+
+* 分层架构
+
+![分层架构](https://github.com/zzhangyuhang/thinking-in-my-work/blob/master/ODS和DW分层.jpg)
+
+* 这个是分层架构,我们可以看到所有数据源头都汇总到ODS层.然后统一由ODS层向上提取出数据仓库DW层的数据,解决了数据源头不统一的问题.分层方便数据的管理.虽然这种分层架构所有的数据都要进入ODS,导致ODS的灵活性下降.但是试想一下有多少需求需要从ODS中产出呢?10个里面有1个就不错了.而且逐层产出的数据仓库层/数据集市层,里面的多维模型下的事实表也分很多种.事务型事实表完全能够满足对历史数据的需求,又何必再到ODS来产出呢?
+
+### 思考
+* 平心而论,对于对于历史订单状态流转问题的解决办法挺多的.实际解决并不是添加ODS层来完成.只不过大佬的公司可能并没有做数据仓库分层.导致所有数据直接导入数据仓库.
+0. 前提,后台记录状态流转.不要从点击流/接口流数据中取得.(累计状态不是从这两个流中取得导致数据源头不一致)
+1. 在订单宽表中收录状态流转的信息.状态流转以map<status,time>形式存在.
+2. 在多维模型中,采用订单流转来做订单的事务型事实表.然后向上抽取出累计型的订单事实表.
